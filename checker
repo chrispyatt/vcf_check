@@ -1,0 +1,44 @@
+#python
+
+import argparse
+from pysam import VariantFile
+
+# get args
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_vcf", help="Input VCF. Should contain only variants from genes with a particular MOI. I.e. all biallelic.")
+    parser.add_argument("af_threshold", help="Filter threshold for gnomad_af annotation.")
+    args = parser.parse_args()
+    return args
+
+
+def check_threshold_correct(af, tag, threshold):
+    if (af <= threshold and tag == 'INCLUDE') or (af > threshold and tag == 'EXCLUDE'):
+        return True
+    else:
+        return False
+
+
+def check_vcf(in_vcf, thresh):
+    # read in vcf
+    data = VariantFile(in_vcf, 'r')
+    for rec in data.fetch():
+        # filter_result should be either INCLUDE or EXCLUDE
+        filter_result = str(rec.filter.keys()).strip('\[\'\]')
+        # get gnomad AF values
+        eAF = row.INFO_gnomade_AF
+        gAF = row.INFO_gnomadg_AF
+        # get MOI
+        moi = row.INFO_MOI
+        # check filter_result is correct
+        check_ex = check_threshold_correct(eAF, filter_result, thresh)
+        check_gen = check_threshold_correct(gAF, filter_result, thresh)
+        if not check_ex and check_gen:
+            print(f'Incorrect. Filter result ({filter_result}) does not conform to desired threshold ({thresh}) for MOI ({moi}). AFs are {eAF} and {gAF}.')
+        else:
+            continue
+
+
+def main():
+    args = get_args()
+    check_vcf(args.input_vcf, args.af_threshold)
