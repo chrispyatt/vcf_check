@@ -26,10 +26,14 @@ def check_vcf(in_vcf, thresh):
         # filter_result should be either INCLUDE or EXCLUDE
         filter_result = str(rec.filter.keys()).strip('\[\'\]')
         # get gnomad AF values
-        eAF = row.INFO_gnomade_AF
-        gAF = row.INFO_gnomadg_AF
+        csq_index = list(data.header.info).index('CSQ')
+        gnomade_index = list(data.header.info).index('gnomADe_AF')
+        gnomadg_index = list(data.header.info).index('gnomADg_AF')
+        eAF = rec.info['CSQ'][0].split('|')[23]
+        gAF = rec.info['CSQ'][0].split('|')[20]
         # get MOI
-        moi = row.INFO_MOI
+        moi_index = list(data.header.info).index('MOI')
+        moi = rec.info['MOI']
         # check filter_result is correct
         check_ex = check_threshold_correct(eAF, filter_result, thresh)
         check_gen = check_threshold_correct(gAF, filter_result, thresh)
