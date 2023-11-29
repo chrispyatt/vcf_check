@@ -4,27 +4,58 @@ import argparse
 from pysam import VariantFile
 
 # get args
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input_vcf", help="Input VCF. Should contain only variants from genes with a particular MOI. I.e. all biallelic.")
-    parser.add_argument("af_threshold", help="Filter threshold for gnomad_af annotation.")
+def get_args() -> argparse.Namespace:
+    """
+    Parse command line arguments
+    """
+    parser = argparse.ArgumentParser(
+        description='Test filtering app outputs'
+    )
+    parser.add_argument(
+        "-i",
+        "--input_vcf",
+        type=str,
+        required=True,
+        help="Input VCF. Should contain only variants from genes with a particular MOI. I.e. all biallelic."
+    )
+    parser.add_argument(
+        "-t",
+        "--af_threshold",
+        type=float,
+        required=True,
+        help="Filter threshold for gnomad_af annotation."
+    )
+    parser.add_argument(
+        "-b",
+        "--brief",
+        action='store_true',
+        required=False,
+        help="Only print overall stats."
+    )
     args = parser.parse_args()
     return args
 
 
-def check_threshold_correct(af, tag, threshold):
-    if (af <= threshold and tag == 'INCLUDE') or (af > threshold and tag == 'EXCLUDE'):
+def check_threshold_correct(gaf, eaf, tag, threshold):
+    """
+    Check whether tag is correctly applied
+    """
+    if ((gaf <= threshold and eaf <= threshold) and tag == 'PASS') or ((gaf > threshold or eaf > threshold) and tag == 'EXCLUDE'):
         return True
     else:
         return False
 
 
-def check_vcf(in_vcf, thresh):
+def check_vcf(in_vcf, thresh, brief):
+    """
+    Collect relevant metrics & compare to given threshold
+    """
     # read in vcf
     data = VariantFile(in_vcf, 'r')
     num_correct = 0
     num_incorrect = 0
     total_recs = 0
+    moi_list = []
     for rec in data.fetch():
         total_recs = total_recs + 1
         # filter_result should be either INCLUDE or EXCLUDE
@@ -37,29 +68,55 @@ def check_vcf(in_vcf, thresh):
             eAF = float(rec.info['CSQ'][0].split('|')[23])
             gAF = float(rec.info['CSQ'][0].split('|')[20])
         except ValueError as err:
-            print(err, 'AF info', rec.info['CSQ'][0].split('|')[23], rec.info['CSQ'][0].split('|')[20])
+            if not brief:
+                print(err, f'Filter: {filter_result}', 'AF info:', rec.info['CSQ'][0].split('|')[23], rec.info['CSQ'][0].split('|')[20])
         # get MOI
         moi_index = list(data.header.info).index('MOI')
         try:
             moi = rec.info['MOI']
+            moi_list.append(moi)
+        except KeyError as err:
+            if not brief:
+                print(err)
+            continue
+        # check filter_result is correct
+        check_result = check_threshold_correct(gAF, eAF, filter_result, thresh)
+        if not check_result:
+            num_incorrect = num_incorrect + 1
+            if not brief:
+                print(f'Incorrect. Filter result ({filter_result}) does not conform to desired threshold ({thresh}) for MOI ({moi}). AFs are {eAF} and {gAF}.')
+        else:
+            num_correct = num_correct + 1
+            if not brief:
+                print(f'Record correctly filtered. Filter: {filter_result}, AFs: {eAF} & {gAF}, Threshold: {thresh}, MOI: {moi}.')
+    return num_correct, num_incorrect, total_recs, set(moi_list)
+
+
+def check_mois(in_vcf):
+    """
+    Return list of MOIs in vcf (should just be one if given curated input)
+    """
+    # read in vcf
+    data = VariantFile(in_vcf, 'r')
+    moi_list = []
+    for rec in data.fetch():
+        try:
+                moi = rec.info['MOI']
+                moi_list.append(moi)
         except KeyError as err:
             print(err)
             continue
-        # check filter_result is correct
-        check_ex = check_threshold_correct(eAF, filter_result, thresh)
-        check_gen = check_threshold_correct(gAF, filter_result, thresh)
-        if not check_ex and check_gen:
-            print(f'Incorrect. Filter result ({filter_result}) does not conform to desired threshold ({thresh}) for MOI ({moi}). AFs are {eAF} and {gAF}.')
-            num_incorrect = num_incorrect + 1
-        else:
-            print(f'Record correctly filtered. Filter: {filter_result}, AFs: {eAF} & {gAF}, Threshold: {thresh}, MOI: {moi}.')
-            num_correct = num_correct + 1
-    return num_correct, num_incorrect, total_recs
+    return set(moi_list)
+
 
 def main():
     args = get_args()
-    print(args)
-    right, wrong, total = check_vcf(args.input_vcf, args.af_threshold)
-    print(f'Total number of records assessed: {total}')
-    print(f'Records tagged correctly: {right}')
-    print(f'Records tagged incorrectly: {wrong}')
+    #right, wrong, total, mois = check_vcf(args.input_vcf, args.af_threshold, args.brief)
+    #print(f'Total number of records assessed: {total}')
+    #print(f'Records tagged correctly: {right}')
+    #print(f'Records tagged incorrectly: {wrong}. IGNORE - record may be excluded for non-AF reasons')
+    mois = check_mois(args.input_vcf)
+    print(f'MOIs identified in this VCF: {mois}')
+
+if __name__ == "__main__":
+    main()
